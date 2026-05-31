@@ -1,0 +1,272 @@
+/**
+ * BTech Audit — Parser VHF (Consulta Geral de Reservas)
+ * Suporta: CSV com sep=; ou auto-detect, encoding CP1252/UTF-8, campos multiline
+ */
+
+// ── Normaliza encoding CP1252 → UTF-8 via TextDecoder ─────────────────────
+export async function readFileAsText(file) {
+  const buf = await file.arrayBuffer();
+  // Tenta UTF-8 com BOM, depois CP1252
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    return utf8.startsWith('﻿') ? utf8.slice(1) : utf8;
+  } catch {
+    return new TextDecoder('windows-1252').decode(buf);
+  }
+}
+
+// ── Parser CSV com suporte a multiline e múltiplos separadores ────────────
+export function parseCSV(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  let startIdx = 0;
+
+  // Skip sep= linha do Excel
+  if (lines[0]?.toLowerCase().startsWith('sep=')) startIdx = 1;
+
+  const headerLine = lines[startIdx] || '';
+  // Auto-detecta separador (;  > ,)
+  const sep = (headerLine.split(';').length > headerLine.split(',').length) ? ';' : ',';
+
+  const header = splitLine(headerLine, sep).map(h => normalizeKey(h));
+  const rows = [];
+
+  let i = startIdx + 1;
+  while (i < lines.length) {
+    let raw = lines[i];
+    // Junta linhas enquanto número de aspas for ímpar (campo multiline)
+    while (countQuotes(raw) % 2 !== 0 && i + 1 < lines.length) {
+      i++;
+      raw += '\n' + lines[i];
+    }
+
+    const cells = splitLine(raw, sep);
+    if (cells.length < 5) { i++; continue; }
+
+    const status = cells[0]?.trim().replace(/^"|"$/g, '').trim();
+    if (!['Checkin', 'Checkout', 'Reserva', 'No Show', 'Cancelada'].includes(status)) {
+      i++;
+      continue;
+    }
+
+    const row = {};
+    header.forEach((h, idx) => {
+      row[h] = (cells[idx] ?? '').trim().replace(/^"|"$/g, '').trim();
+    });
+    rows.push(row);
+    i++;
+  }
+
+  return rows;
+}
+
+function countQuotes(s) {
+  return (s.match(/"/g) || []).length;
+}
+
+function splitLine(line, sep) {
+  const result = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (c === sep && !inQ) {
+      result.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function normalizeKey(k) {
+  // Remove BOM e normaliza espaços
+  return k.replace(/^﻿/, '').trim();
+}
+
+// ── Converte número BR (1.234,56 → 1234.56) ───────────────────────────────
+export function parseBRNum(s) {
+  if (s === undefined || s === null || s === '') return 0;
+  const str = String(s).trim();
+  // 1.234,56 → 1234.56
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(str))
+    return parseFloat(str.replace(/\./g, '').replace(',', '.')) || 0;
+  // 1234,56 → 1234.56
+  if (/^\d+,\d{1,2}$/.test(str))
+    return parseFloat(str.replace(',', '.')) || 0;
+  // já é ponto decimal
+  return parseFloat(str) || 0;
+}
+
+// ── Converte data BR (DD/MM/YYYY → YYYY-MM-DD) ────────────────────────────
+export function parseBRDate(s) {
+  if (!s) return '';
+  const p = s.trim().split('/');
+  if (p.length === 3) return `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
+  return s;
+}
+
+// ── Extrai valor TRF das observações ─────────────────────────────────────
+// Padrões reconhecidos:
+//   TRF 335,23 / TRF 1.258,19 / TRF 1258 / TRF 335.23
+//   Ignora: TRF CONFIDENCIAL, TRF JED, TRF + texto sem número
+export function extractTRF(obs) {
+  if (!obs) return null;
+  const patterns = [
+    /\bTRF\s+([\d]{1,3}(?:\.\d{3})*(?:,\d{1,2})?)\b/gi,  // 1.258,19
+    /\bTRF\s+(\d+,\d{1,2})\b/gi,                            // 335,23
+    /\bTRF\s+(\d+\.\d{1,2})\b/gi,                           // 335.23
+    /\bTRF\s+(\d{3,6})\b/gi,                                 // 1258 (inteiro > 100)
+  ];
+
+  for (const pat of patterns) {
+    const matches = [...obs.matchAll(pat)];
+    for (const m of matches) {
+      const raw = m[1];
+      const val = parseBRNum(raw);
+      if (val >= 10) return val;
+    }
+  }
+  return null;
+}
+
+// ── Categoriza hóspede ────────────────────────────────────────────────────
+export function categorize(row) {
+  const origem   = (row['Origem']       || '').toUpperCase();
+  const segmento = (row['Segmento']     || '').toUpperCase();
+  const tipo     = (row['Tipo h\xF3spede'] || row['Tipo hospede'] || '').toUpperCase();
+  const obs      = (row['OBSERVACOES']  || '').toUpperCase();
+  const conf     = (row['Confidencial'] || '').toUpperCase();
+  const grupo    = (row['Grupo']        || '').trim();
+
+  if (tipo === 'COURTESY' || segmento.includes('COMPLIMENTARY') || obs.includes('CORTESIA')) return 'CORTESIA';
+  if (conf === 'S' || obs.includes('CONFIDENCIAL') || segmento.includes('CONFIDENTIAL')) return 'CONFIDENCIAL';
+  if (segmento.includes('CREWS') || origem.includes('CREWS')) return 'CREWS';
+  if (segmento.includes('GROUP') || segmento.includes('GROUPS') || grupo) return 'GRUPO';
+  if (segmento.includes('OTA') || origem.includes('AGENCIA ON-LINE') || origem.includes('BOOKING') || origem.includes('EXPEDIA')) return 'OTA';
+  if (origem.includes('MELIA.COM') || origem.includes('CALL CENTER') || segmento.includes('DIRECT CLIENT') || segmento.includes('DIRETO')) return 'DIRETO';
+  if (segmento.includes('TTOO') || segmento.includes('TRAVEL AGENCY') || origem.includes('OPERADORA') || origem.includes('MICE')) return 'B2B';
+  return 'OUTROS';
+}
+
+// ── Detecta alertas por hóspede ───────────────────────────────────────────
+export function detectAlerts(row, cat, trfEsperado) {
+  const alerts = [];
+  const diaria = parseBRNum(row['Vlr. di\xE1ria'] || row['Vlr. diaria'] || 0);
+  const obs    = (row['OBSERVACOES'] || '').toUpperCase();
+
+  if (trfEsperado !== null) {
+    const diff = Math.abs(diaria - trfEsperado);
+    if (diff > 1) {
+      const severity = diff >= 50 ? 'critical' : diff >= 20 ? 'high' : 'medium';
+      alerts.push({ type: 'DIVERGENCIA_TARIFA', severity, diff, expected: trfEsperado, actual: diaria });
+    }
+  }
+
+  if (obs.includes('SALDO NEGATIVO') || obs.includes('SALDO NEG')) alerts.push({ type: 'SALDO_NEGATIVO', severity: 'high' });
+  if (obs.includes('LIMITE DE CREDITO') || obs.includes('LIMITE CREDITO')) alerts.push({ type: 'LIMITE_CREDITO', severity: 'high' });
+  if (obs.includes('NAO PERTURBAR') || obs.includes('NÃO PERTURBAR') || obs.includes('DND')) alerts.push({ type: 'DND', severity: 'info' });
+  if (cat === 'CONFIDENCIAL') alerts.push({ type: 'CONFIDENCIAL', severity: 'medium' });
+
+  return alerts;
+}
+
+// ── Processa o array de linhas brutas → estrutura auditável ───────────────
+export function processRows(rawRows) {
+  const today    = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+  const rows = rawRows
+    .filter(r => r['Status'] === 'Checkin') // apenas in-house
+    .map(r => {
+      const diaria  = parseBRNum(r['Vlr. di\xE1ria'] || r['Vlr. diaria'] || 0);
+      const partida = parseBRDate(r['Partida'] || '');
+      const chegada = parseBRDate(r['Chegada'] || '');
+      const trf     = extractTRF(r['OBSERVACOES'] || '');
+      const cat     = categorize(r);
+      const alerts  = detectAlerts(r, cat, trf);
+
+      return {
+        uh:        r['UH']              || '',
+        nome:      r['H\xF3spede']      || r['Hospede']    || r['Hóspede'] || '',
+        categoria: cat,
+        tarifa:    r['Tarifa']          || '',
+        diaria,
+        trf,
+        chegada,
+        partida,
+        origem:    r['Origem']          || '',
+        segmento:  r['Segmento']        || '',
+        grupo:     r['Grupo']           || '',
+        confidencial: (r['Confidencial'] || '') === 'S',
+        horaPartida: r['Hora partida']  || '',
+        obs:       r['OBSERVACOES']     || '',
+        razaoSocial: r['Raz\xE3o social'] || r['Razao social'] || '',
+        isCheckoutToday:    partida === today,
+        isCheckoutTomorrow: partida === tomorrow,
+        alerts,
+        raw: r,
+      };
+    });
+
+  // Também processa Checkout Status para saídas confirmadas
+  const checkouts = rawRows
+    .filter(r => r['Status'] === 'Checkout')
+    .map(r => ({
+      uh:      r['UH'] || '',
+      nome:    r['H\xF3spede'] || r['Hóspede'] || '',
+      partida: parseBRDate(r['Partida'] || ''),
+      diaria:  parseBRNum(r['Vlr. di\xE1ria'] || r['Vlr. diaria'] || 0),
+      tarifa:  r['Tarifa'] || '',
+      obs:     r['OBSERVACOES'] || '',
+    }));
+
+  return { rows, checkouts };
+}
+
+// ── Calcula KPIs ─────────────────────────────────────────────────────────
+export function calcKPIs(rows, allRaw, totalUHs = null) {
+  const inHouse = rows;
+  const ocupacao = inHouse.length;
+
+  const byCat = {};
+  let receita = 0;
+
+  for (const r of inHouse) {
+    byCat[r.categoria] = (byCat[r.categoria] || 0) + 1;
+    receita += r.diaria;
+  }
+
+  const divergencias = inHouse.filter(r => r.trf !== null && Math.abs(r.diaria - r.trf) > 1);
+  const saidasHoje   = inHouse.filter(r => r.isCheckoutToday);
+  const saidasAmanha = inHouse.filter(r => r.isCheckoutTomorrow);
+  const alertasCrit  = inHouse.flatMap(r => r.alerts).filter(a => a.severity === 'critical' || a.severity === 'high');
+
+  const adr = ocupacao > 0 ? receita / ocupacao : 0;
+  const taxaOcup = totalUHs ? (ocupacao / totalUHs) * 100 : null;
+  const revpar   = (totalUHs && taxaOcup) ? (receita / totalUHs) : null;
+
+  return {
+    ocupacao,
+    receita,
+    adr,
+    taxaOcup,
+    revpar,
+    divergencias: divergencias.length,
+    divergenciaValor: divergencias.reduce((s, r) => s + Math.abs(r.diaria - r.trf), 0),
+    saidasHoje:   saidasHoje.length,
+    saidasAmanha: saidasAmanha.length,
+    alertasCriticos: alertasCrit.length,
+    byCat,
+    faturados:   (byCat['B2B'] || 0) + (byCat['DIRETO'] || 0),
+    grupos:       byCat['GRUPO']      || 0,
+    cortesias:    byCat['CORTESIA']   || 0,
+    online:       byCat['OTA']        || 0,
+    confidenciais: byCat['CONFIDENCIAL'] || 0,
+    crews:        byCat['CREWS']      || 0,
+  };
+}
