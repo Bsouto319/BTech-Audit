@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 export function useAuth() {
-  const [user,    setUser]    = useState(undefined); // undefined = loading
+  const [user,    setUser]    = useState(undefined);
   const [profile, setProfile] = useState(null);
 
   useEffect(() => {
@@ -39,11 +39,13 @@ export function useAuth() {
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
     if (data.user) {
-      await supabase.from('audit_profiles').insert({
-        id: data.user.id,
-        hotel_name: hotelName,
+      // upsert — o trigger pode já ter criado o perfil com hotel vazio
+      await supabase.from('audit_profiles').upsert({
+        id:                  data.user.id,
+        email:               email,
+        hotel_name:          hotelName,
         subscription_status: 'trial',
-      });
+      }, { onConflict: 'id', ignoreDuplicates: false });
     }
     return data;
   }
