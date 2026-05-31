@@ -2,15 +2,13 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html {
+html, body {
   height: 100%;
-  background: #070b14;
+  background: #050d1a;
 }
 
 body {
-  height: 100%;
   font-family: 'DM Sans', sans-serif;
-  background: #070b14;
   color: #e2e8f0;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -18,15 +16,16 @@ body {
 
 #root {
   min-height: 100vh;
+  width: 100vw;
   display: flex;
   flex-direction: column;
-  background: #070b14;
+  background: #050d1a;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #111827; }
-::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #050d1a; }
+::-webkit-scrollbar-thumb { background: #1a3354; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2563eb; }
 
 input, button, select, textarea { font-family: inherit; }
 a { color: #3b82f6; text-decoration: none; }

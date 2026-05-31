@@ -175,10 +175,27 @@ export function detectAlerts(row, cat, trfEsperado) {
   return alerts;
 }
 
+// ── Determina data de referência do relatório (menor Partida dos Checkins) ─
+export function getReportRefDate(rawRows) {
+  const partidas = rawRows
+    .filter(r => r['Status'] === 'Checkin')
+    .map(r => parseBRDate(r['Partida'] || ''))
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  return partidas[0] || new Date().toISOString().split('T')[0];
+}
+
+function addDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
+}
+
 // ── Processa o array de linhas brutas → estrutura auditável ───────────────
 export function processRows(rawRows) {
-  const today    = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  // Data de referência = menor Partida do relatório (não a data real de hoje)
+  const refDate  = getReportRefDate(rawRows);
+  const nextDate = addDay(refDate);
 
   const rows = rawRows
     .filter(r => r['Status'] === 'Checkin') // apenas in-house
@@ -206,14 +223,14 @@ export function processRows(rawRows) {
         horaPartida: r['Hora partida']  || '',
         obs:       r['OBSERVACOES']     || '',
         razaoSocial: r['Raz\xE3o social'] || r['Razao social'] || '',
-        isCheckoutToday:    partida === today,
-        isCheckoutTomorrow: partida === tomorrow,
+        isCheckoutToday:    partida === refDate,
+        isCheckoutTomorrow: partida === nextDate,
         alerts,
         raw: r,
       };
     });
 
-  // Também processa Checkout Status para saídas confirmadas
+  // Checkout Status = saídas já efetivadas no relatório
   const checkouts = rawRows
     .filter(r => r['Status'] === 'Checkout')
     .map(r => ({
@@ -225,7 +242,7 @@ export function processRows(rawRows) {
       obs:     r['OBSERVACOES'] || '',
     }));
 
-  return { rows, checkouts };
+  return { rows, checkouts, refDate, nextDate };
 }
 
 // ── Calcula KPIs ─────────────────────────────────────────────────────────

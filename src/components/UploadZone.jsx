@@ -17,10 +17,10 @@ export default function UploadZone({ onData }) {
         const text = await readFileAsText(file);
         const raw  = parseCSV(text);
         if (raw.length === 0) throw new Error('Nenhum registro encontrado. Verifique se o arquivo é a Consulta Geral de Reservas do VHF.');
-        const { rows, checkouts } = processRows(raw);
+        const { rows, checkouts, refDate, nextDate } = processRows(raw);
         const kpis = calcKPIs(rows, raw);
         setStatus({ type: 'ok', msg: `✅ ${raw.length} linhas processadas → ${rows.length} in-house, ${checkouts.length} checkouts` });
-        onData({ rows, checkouts, kpis, fileName: file.name, loadedAt: new Date() });
+        onData({ rows, checkouts, kpis, refDate, nextDate, fileName: file.name, loadedAt: new Date() });
       } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         setStatus({ type: 'warn', msg: '⚠️ Para melhor precisão, exporte como CSV no VHF: Consulta Geral de Reservas → Exportar CSV' });
         setLoading(false);
