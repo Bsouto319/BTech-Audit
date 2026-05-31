@@ -99,7 +99,7 @@ function AiInsights({ data }) {
   );
 }
 
-export default function Dashboard({ profile, onSignOut }) {
+export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) {
   const [page,   setPage]   = useState('dash');
   const [data,   setData]   = useState(null);
 
@@ -113,6 +113,7 @@ export default function Dashboard({ profile, onSignOut }) {
   return (
     <div style={{display:'flex',minHeight:'100vh',background:'#0a0e1a',fontFamily:"'DM Sans',sans-serif",color:'#e2e8f0'}}>
       <Sidebar page={page} setPage={setPage} hotelName={profile?.hotel_name} onSignOut={onSignOut}
+        isAdmin={isAdmin} onOpenAdmin={onOpenAdmin}
         alerts={{ divergencias: data?.kpis?.divergencias || 0, saidasHoje: data?.kpis?.saidasHoje || 0 }} />
 
       <main style={{marginLeft:200,flex:1,padding:'24px 28px',minHeight:'100vh'}}>
