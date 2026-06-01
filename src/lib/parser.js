@@ -93,7 +93,9 @@ export function categorize(row) {
   const obs      = (row['OBSERVACOES'] || '').toUpperCase();
   const conf     = (row['Confidencial'] || '').toUpperCase();
   const grupo    = (row['Grupo'] || '').trim();
-  if (tipo === 'COURTESY' || segmento.includes('COMPLIMENTARY') || obs.includes('CORTESIA')) return 'CORTESIA';
+  // "FATURAR" na obs indica cobrança real — nunca é cortesia independente do tipo/segmento
+  const faturar  = obs.includes('FATURAR');
+  if (!faturar && (tipo === 'COURTESY' || segmento.includes('COMPLIMENTARY') || obs.includes('CORTESIA'))) return 'CORTESIA';
   if (conf === 'S' || obs.includes('CONFIDENCIAL') || segmento.includes('CONFIDENTIAL')) return 'CONFIDENCIAL';
   if (segmento.includes('CREWS') || origem.includes('CREWS')) return 'CREWS';
   if (segmento.includes('GROUP') || segmento.includes('GROUPS') || grupo) return 'GRUPO';
