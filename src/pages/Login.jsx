@@ -63,8 +63,10 @@ export default function Login() {
 
   return (
     <div style={outer}>
-      {/* Glow decoration */}
-      <div style={{ position: 'absolute', top: '20%', left: '50%', transform: 'translateX(-50%)', width: 400, height: 400, background: 'radial-gradient(circle, rgba(59,130,246,.15) 0%, transparent 70%)', pointerEvents: 'none' }} />
+      {/* Blue glow decorations */}
+      <div style={{ position: 'absolute', top: '-10%', left: '50%', transform: 'translateX(-50%)', width: 700, height: 500, background: 'radial-gradient(ellipse, rgba(37,99,235,.25) 0%, transparent 65%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: '-10%', left: '20%', width: 400, height: 400, background: 'radial-gradient(circle, rgba(59,130,246,.12) 0%, transparent 65%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: '30%', right: '10%', width: 300, height: 300, background: 'radial-gradient(circle, rgba(96,165,250,.08) 0%, transparent 65%)', pointerEvents: 'none' }} />
 
       <div style={card}>
         {/* Brand */}
@@ -140,7 +142,7 @@ function Field({ label, children }) {
 
 const outer = {
   minHeight: '100vh',
-  background: '#070b14',
+  background: 'linear-gradient(135deg, #0a1628 0%, #0d2045 40%, #0a1a38 70%, #071020 100%)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
