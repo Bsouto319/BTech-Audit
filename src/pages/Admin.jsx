@@ -7,11 +7,17 @@ const STATUS_COLORS = {
   canceled: { bg: 'rgba(239,68,68,.12)',  color: '#ef4444', label: 'Cancelado' },
 };
 
+const EMPTY_FORM = { email: '', hotel_name: '', total_uh: '', status: 'trial' };
+
 export default function Admin({ onBack }) {
   const [profiles, setProfiles] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
   const [toast,    setToast]    = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [form,      setForm]      = useState(EMPTY_FORM);
+  const [creating,  setCreating]  = useState(false);
+  const [created,   setCreated]   = useState(null); // { email, password }
 
   useEffect(() => { load(); }, []);
 
@@ -39,6 +45,24 @@ export default function Admin({ onBack }) {
     setTimeout(() => setToast(''), 3000);
   }
 
+  async function createUser() {
+    if (!form.email || !form.hotel_name) return showToast('Email e hotel são obrigatórios');
+    setCreating(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch('/api/admin-create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(form),
+    });
+    const json = await res.json();
+    setCreating(false);
+    if (!res.ok) return showToast('Erro: ' + json.error);
+    setCreated({ email: json.email, password: json.password });
+    setForm(EMPTY_FORM);
+    load();
+  }
+
   const filtered = profiles.filter(p =>
     p.hotel_name?.toLowerCase().includes(search.toLowerCase()) ||
     p.email?.toLowerCase().includes(search.toLowerCase())
@@ -59,10 +83,13 @@ export default function Admin({ onBack }) {
         <button onClick={onBack} style={{ background: '#1a2235', border: '1px solid #2a3550', borderRadius: 8, color: '#94a3b8', padding: '6px 14px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem' }}>
           ← Voltar
         </button>
-        <div>
+        <div style={{ flex: 1 }}>
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#e2e8f0' }}>Painel Admin</h1>
           <p style={{ color: '#475569', fontSize: '.78rem' }}>BTech Audit — Gestão de Clientes</p>
         </div>
+        <button onClick={() => { setShowModal(true); setCreated(null); }} style={{ background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', padding: '8px 18px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '.82rem', fontWeight: 600 }}>
+          + Adicionar Usuário
+        </button>
       </div>
 
       {/* KPIs */}
@@ -160,6 +187,67 @@ export default function Admin({ onBack }) {
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, background: '#22c55e', color: '#fff', padding: '10px 20px', borderRadius: 10, fontWeight: 600, fontSize: '.82rem', boxShadow: '0 4px 20px rgba(0,0,0,.4)' }}>
           {toast}
+        </div>
+      )}
+
+      {/* Modal criar usuário */}
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={e => { if (e.target === e.currentTarget) { setShowModal(false); setCreated(null); } }}>
+          <div style={{ background: '#111827', border: '1px solid #2a3550', borderRadius: 14, padding: 28, width: '100%', maxWidth: 420 }}>
+            <h2 style={{ color: '#e2e8f0', fontWeight: 700, marginBottom: 20, fontSize: '1rem' }}>Adicionar Usuário de Teste</h2>
+
+            {created ? (
+              <div>
+                <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.3)', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+                  <p style={{ color: '#22c55e', fontWeight: 700, marginBottom: 10 }}>✓ Usuário criado!</p>
+                  <p style={{ color: '#94a3b8', fontSize: '.82rem', marginBottom: 6 }}>Email: <strong style={{ color: '#e2e8f0' }}>{created.email}</strong></p>
+                  <p style={{ color: '#94a3b8', fontSize: '.82rem' }}>Senha temporária: <strong style={{ color: '#fbbf24', fontFamily: 'monospace', fontSize: '1rem' }}>{created.password}</strong></p>
+                  <p style={{ color: '#475569', fontSize: '.72rem', marginTop: 10 }}>Copie a senha acima e compartilhe com o usuário de teste.</p>
+                </div>
+                <button onClick={() => { setShowModal(false); setCreated(null); }} style={{ width: '100%', padding: '10px', background: '#1a2235', border: '1px solid #2a3550', borderRadius: 8, color: '#94a3b8', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {[
+                  { label: 'Email', key: 'email', type: 'email', placeholder: 'teste@hotel.com' },
+                  { label: 'Nome do Hotel', key: 'hotel_name', type: 'text', placeholder: 'Hotel Exemplo' },
+                  { label: 'Total de UHs', key: 'total_uh', type: 'number', placeholder: '150' },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label style={{ color: '#64748b', fontSize: '.75rem', display: 'block', marginBottom: 5 }}>{f.label}</label>
+                    <input
+                      type={f.type}
+                      placeholder={f.placeholder}
+                      value={form[f.key]}
+                      onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                      style={{ width: '100%', padding: '9px 12px', background: '#1a2235', border: '1px solid #2a3550', borderRadius: 8, color: '#e2e8f0', fontFamily: 'inherit', fontSize: '.82rem', outline: 'none', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                ))}
+                <div>
+                  <label style={{ color: '#64748b', fontSize: '.75rem', display: 'block', marginBottom: 5 }}>Status inicial</label>
+                  <select
+                    value={form.status}
+                    onChange={e => setForm(p => ({ ...p, status: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', background: '#1a2235', border: '1px solid #2a3550', borderRadius: 8, color: '#e2e8f0', fontFamily: 'inherit', fontSize: '.82rem', outline: 'none' }}
+                  >
+                    <option value="trial">Trial</option>
+                    <option value="active">Ativo</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+                  <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px', background: 'transparent', border: '1px solid #2a3550', borderRadius: 8, color: '#64748b', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
+                    Cancelar
+                  </button>
+                  <button onClick={createUser} disabled={creating} style={{ flex: 2, padding: '10px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', cursor: creating ? 'default' : 'pointer', fontFamily: 'inherit', fontWeight: 700, opacity: creating ? .6 : 1 }}>
+                    {creating ? 'Criando...' : 'Criar Usuário'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
