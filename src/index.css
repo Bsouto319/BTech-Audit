@@ -1,31 +1,57 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body {
-  height: 100%;
-  background: #050d1a;
+:root {
+  --bg:        #0a0b0e;
+  --bg2:       #0f1117;
+  --bg3:       #14171f;
+  --border:    #1e2330;
+  --border2:   #252b3b;
+  --text:      #e8ecf4;
+  --text2:     #8892a4;
+  --text3:     #404a5c;
+  --accent:    #e8a838;
+  --accent2:   #f0bc5e;
+  --green:     #26d07c;
+  --green2:    #1aac62;
+  --red:       #f05252;
+  --red2:      #c73e3e;
+  --blue:      #4b9eff;
+  --purple:    #a78bfa;
+  --cyan:      #22d3ee;
+  --orange:    #fb923c;
+  --mono:      'IBM Plex Mono', monospace;
+  --sans:      'IBM Plex Sans', sans-serif;
+  --display:   'Syne', sans-serif;
 }
+
+html, body { height: 100%; background: var(--bg); }
 
 body {
-  font-family: 'DM Sans', sans-serif;
-  color: #e2e8f0;
+  font-family: var(--sans);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-#root {
-  min-height: 100vh;
-  width: 100vw;
-  display: flex;
-  flex-direction: column;
-  background: #050d1a;
-}
+#root { min-height: 100vh; width: 100vw; display: flex; flex-direction: column; }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #050d1a; }
-::-webkit-scrollbar-thumb { background: #1a3354; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 input, button, select, textarea { font-family: inherit; }
-a { color: #3b82f6; text-decoration: none; }
+a { color: var(--blue); text-decoration: none; }
+
+.mono { font-family: var(--mono); }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .3; }
+}

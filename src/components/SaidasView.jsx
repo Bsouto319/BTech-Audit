@@ -8,42 +8,89 @@ function fmtDate(iso) {
 
 function Card({ r }) {
   return (
-    <div style={{ background: '#071428', border: '1px solid #0f2544', borderRadius: 10, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '.78rem', padding: '2px 6px', background: 'rgba(37,99,235,.15)', color: '#60a5fa', borderRadius: 4 }}>{r.uh}</span>
-          <span style={{ fontWeight: 600, color: '#e2e8f0', fontSize: '.85rem' }}>{r.nome}</span>
-          {r.confidencial && <span style={{ background: 'rgba(239,68,68,.12)', color: '#ef4444', borderRadius: 6, padding: '1px 6px', fontSize: '.62rem', fontWeight: 700 }}>CONF</span>}
+    <div style={{
+      background: 'var(--bg)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '11px 14px',
+      display: 'flex', justifyContent: 'space-between',
+      alignItems: 'flex-start', gap: 12,
+      transition: 'border-color .15s',
+    }}
+    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border2)'}
+    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontWeight: 600, fontSize: '.7rem',
+            padding: '1px 6px', background: 'rgba(75,158,255,.1)',
+            color: 'var(--blue)', borderRadius: 4, flexShrink: 0,
+          }}>{r.uh}</span>
+          <span style={{ fontWeight: 500, color: 'var(--text)', fontSize: '.82rem' }}>{r.nome}</span>
+          {r.confidencial && (
+            <span style={{
+              background: 'rgba(240,82,82,.1)', color: 'var(--red)',
+              borderRadius: 4, padding: '1px 5px', fontSize: '.58rem',
+              fontFamily: 'var(--mono)', fontWeight: 600,
+            }}>CONF</span>
+          )}
         </div>
-        {r.obs && <p style={{ fontSize: '.7rem', color: '#334d6e', marginTop: 4, lineHeight: 1.5 }}>{r.obs.slice(0, 180)}{r.obs.length > 180 ? '...' : ''}</p>}
+        {r.obs && (
+          <p style={{ fontSize: '.67rem', color: 'var(--text3)', marginTop: 2, lineHeight: 1.5 }}>
+            {r.obs.slice(0, 160)}{r.obs.length > 160 ? '…' : ''}
+          </p>
+        )}
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontFamily: 'monospace', fontWeight: 700, color: '#10b981', fontSize: '.9rem' }}>
-          R$ {Number(r.diaria).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+        <div style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--green)', fontSize: '.88rem' }}>
+          {Number(r.diaria).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
         </div>
-        <div style={{ fontSize: '.68rem', color: '#1e4080', marginTop: 2 }}>{r.tarifa || '—'}</div>
+        <div style={{ fontSize: '.63rem', color: 'var(--text3)', marginTop: 1 }}>{r.tarifa || '—'}</div>
         {r.horaPartida && r.horaPartida !== '30/12/1899 12:00:00' && (
-          <div style={{ fontSize: '.68rem', color: '#f59e0b', marginTop: 2 }}>⏰ {r.horaPartida}</div>
+          <div style={{ fontSize: '.63rem', color: 'var(--accent)', marginTop: 2 }}>⏱ {r.horaPartida}</div>
         )}
       </div>
     </div>
   );
 }
 
-function Section({ title, color, rows, total }) {
+function Section({ title, dot, rows, total }) {
+  const dotColor = dot === 'red' ? 'var(--red)' : 'var(--accent)';
   return (
-    <div style={{ background: '#071020', border: `1px solid ${color}22`, borderRadius: 12, marginBottom: 14, overflow: 'hidden' }}>
-      <div style={{ padding: '13px 18px', borderBottom: `1px solid ${color}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: `${color}08` }}>
-        <h3 style={{ fontWeight: 700, fontSize: '.9rem', color: '#c7d9f5' }}>{title}</h3>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {rows.length > 0 && <span style={{ fontFamily: 'monospace', color: '#10b981', fontWeight: 700, fontSize: '.82rem' }}>R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>}
-          <span style={{ background: `${color}22`, color, borderRadius: 10, padding: '2px 10px', fontSize: '.7rem', fontWeight: 700 }}>{rows.length}</span>
+    <div style={{
+      background: 'var(--bg3)', border: '1px solid var(--border)',
+      borderRadius: 10, marginBottom: 12, overflow: 'hidden',
+    }}>
+      <div style={{
+        padding: '11px 16px', borderBottom: '1px solid var(--border)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        background: 'var(--bg2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%', background: dotColor,
+            display: 'inline-block', flexShrink: 0,
+            animation: dot === 'red' ? 'pulse-dot 2s ease infinite' : 'none',
+          }} />
+          <h3 style={{ fontWeight: 600, fontSize: '.82rem', color: 'var(--text)', fontFamily: 'var(--display)' }}>{title}</h3>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {rows.length > 0 && (
+            <span style={{ fontFamily: 'var(--mono)', color: 'var(--green)', fontWeight: 600, fontSize: '.75rem' }}>
+              {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          )}
+          <span style={{
+            background: `${dotColor}22`, color: dotColor,
+            borderRadius: 10, padding: '1px 8px', fontSize: '.65rem',
+            fontFamily: 'var(--mono)', fontWeight: 700,
+          }}>{rows.length}</span>
         </div>
       </div>
-      <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {rows.length === 0
-          ? <div style={{ textAlign: 'center', padding: 24, color: '#1e3a5f', fontSize: '.82rem' }}>Nenhuma saída prevista</div>
-          : rows.map((r, i) => <Card key={i} r={r} />)}
+          ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--text3)', fontSize: '.78rem' }}>Nenhuma saída prevista</div>
+          : rows.map((r, i) => <Card key={i} r={r} />)
+        }
       </div>
     </div>
   );
@@ -52,17 +99,13 @@ function Section({ title, color, rows, total }) {
 export default function SaidasView({ rows, refDate, nextDate }) {
   const hoje   = useMemo(() => rows.filter(r => r.isCheckoutToday),    [rows]);
   const amanha = useMemo(() => rows.filter(r => r.isCheckoutTomorrow), [rows]);
-
   const totalHoje   = hoje.reduce((s, r) => s + r.diaria, 0);
   const totalAmanha = amanha.reduce((s, r) => s + r.diaria, 0);
 
-  const labelHoje   = refDate  ? `🔴 Saídas ${fmtDate(refDate)}`  : '🔴 Saídas do Dia';
-  const labelAmanha = nextDate ? `🟡 Saídas ${fmtDate(nextDate)}` : '🟡 Saídas Amanhã';
-
   return (
-    <div>
-      <Section title={labelHoje}   color="#ef4444" rows={hoje}   total={totalHoje} />
-      <Section title={labelAmanha} color="#f59e0b" rows={amanha} total={totalAmanha} />
+    <div style={{ animation: 'fadeUp .25s ease' }}>
+      <Section title={`Saídas ${refDate ? fmtDate(refDate) : 'do Dia'}`}  dot="red"    rows={hoje}   total={totalHoje} />
+      <Section title={`Saídas ${nextDate ? fmtDate(nextDate) : 'Amanhã'}`} dot="amber" rows={amanha} total={totalAmanha} />
     </div>
   );
 }
