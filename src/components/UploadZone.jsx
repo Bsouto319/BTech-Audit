@@ -15,12 +15,12 @@ export default function UploadZone({ onData }) {
     try {
       if (name.endsWith('.csv')) {
         const text = await readFileAsText(file);
-        const raw  = parseCSV(text);
-        if (raw.length === 0) throw new Error('Nenhum registro encontrado. Verifique se o arquivo é a Consulta Geral de Reservas do VHF.');
-        const { rows, checkouts, refDate, nextDate } = processRows(raw);
-        const kpis = calcKPIs(rows, raw);
-        setStatus({ type: 'ok', msg: `${raw.length} linhas processadas — ${rows.length} in-house, ${checkouts.length} checkouts` });
-        onData({ rows, checkouts, kpis, refDate, nextDate, fileName: file.name, loadedAt: new Date() });
+        const { rows: normalizedRows, schema } = parseCSV(text);
+        if (normalizedRows.length === 0) throw new Error('Nenhum registro encontrado. Verifique se o arquivo é a Consulta Geral de Reservas.');
+        const { rows, checkouts, refDate, nextDate } = processRows(normalizedRows);
+        const kpis = calcKPIs(rows, normalizedRows);
+        setStatus({ type: 'ok', msg: `${normalizedRows.length} linhas · ${rows.length} in-house · ${checkouts.length} checkouts — schema: ${schema.name}` });
+        onData({ rows, checkouts, kpis, refDate, nextDate, fileName: file.name, loadedAt: new Date(), schema: schema.name });
       } else if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
         setStatus({ type: 'warn', msg: 'Exporte como CSV no VHF: Consulta Geral de Reservas → Exportar CSV' });
         setLoading(false);
