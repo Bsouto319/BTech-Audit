@@ -203,53 +203,100 @@ export function parseBRDate(s) {
 function parseTRFEntries(obs) {
   if (!obs) return [];
   const upper = obs.toUpperCase();
-  const entries = [];
 
-  // Regex principal: TRF + opcional R$ + número
-  const re = /TRF\s*(?:R\$\s*)?([\d]{1,3}(?:\.\d{3})*(?:[,]\d{1,2})?(?:\.\d{2})?)/gi;
+  // Regex principal: TRF + opcional R$ + número (suporta 4+ dígitos como 2209, 2509)
+  const re = /TRF\s*(?:R\$\s*)?(\d+(?:\.\d{3})*(?:,\d{1,2})?)/gi;
+  const matches = [];
   let m;
   while ((m = re.exec(upper)) !== null) {
-    const rawVal = m[1];
-    const value = parseBRNum(rawVal);
+    matches.push({ index: m.index, end: m.index + m[0].length, rawVal: m[1] });
+  }
+  if (matches.length === 0) return [];
+
+  // Data range: aceita "DE DD A DD/MM", "DE DD/MM A DD/MM" e "DE DD/MM-DD/MM"
+  // (hífen como separador é tão comum no PMS quanto a palavra "A"). Pode vir
+  // antes ("DE 24/08-25/08 TRF 1.250,00") ou depois ("TRF 2209,00 DE 15 A 16/06")
+  // do valor, dependendo de como o PMS exportou.
+  const dateRe = /DE\s+(\d{1,2})(?:\/(\d{1,2}))?\s*(?:A|-)\s*(\d{1,2})\/(\d{1,2})/gi;
+  const dateMatches = [];
+  let dm;
+  while ((dm = dateRe.exec(upper)) !== null) {
+    const toMonth = parseInt(dm[4]);
+    const fromMonth = dm[2] ? parseInt(dm[2]) : toMonth;
+    dateMatches.push({
+      index: dm.index,
+      end: dm.index + dm[0].length,
+      dateFrom: { day: parseInt(dm[1]), month: fromMonth },
+      dateTo: { day: parseInt(dm[3]), month: toMonth },
+    });
+  }
+
+  // Associa cada data ao TRF mais próximo (antes OU depois), nunca reaproveitando
+  // a mesma data pra dois TRFs -- é isso que evita a "tarifa vizinha" ser
+  // roubada quando há múltiplas diárias diferentes na mesma observação.
+  const dateForTRF = new Array(matches.length).fill(null);
+  const usedDates = new Set();
+  for (let i = 0; i < matches.length; i++) {
+    let best = null, bestDist = Infinity;
+    for (let j = 0; j < dateMatches.length; j++) {
+      if (usedDates.has(j)) continue;
+      const d = dateMatches[j];
+      let dist = Infinity;
+      if (d.index >= matches[i].end) {
+        // data depois do TRF -- só vale se não houver outro TRF no meio
+        const nextTRF = matches[i + 1];
+        if (!nextTRF || d.index < nextTRF.index) dist = d.index - matches[i].end;
+      } else if (d.end <= matches[i].index) {
+        // data antes do TRF -- só vale se não houver outro TRF no meio
+        const prevTRF = matches[i - 1];
+        if (!prevTRF || d.end > prevTRF.end) dist = matches[i].index - d.end;
+      }
+      if (dist < bestDist) { bestDist = dist; best = j; }
+    }
+    if (best !== null) {
+      dateForTRF[i] = dateMatches[best];
+      usedDates.add(best);
+    }
+  }
+
+  const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE))?)/i;
+
+  const entries = [];
+  for (let i = 0; i < matches.length; i++) {
+    const value = parseBRNum(matches[i].rawVal);
     if (value < 10) continue;
 
-    // Texto após o número (até 100 chars) para extrair label e data
-    const after = upper.slice(m.index + m[0].length, m.index + m[0].length + 100);
-
     // Label de tipo de quarto: SGL, DBL, TPL, SINGLE, DOUBLE, TRIPLE, SUITE
+    // (procurado só depois do valor, até o próximo TRF -- padrão de escrita comum)
+    const spanEnd = i === matches.length - 1 ? upper.length : matches[i + 1].index;
+    const afterText = upper.slice(matches[i].end, spanEnd);
     let label = null;
-    const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE))?)/i;
-    const lm = after.match(labelRe);
+    const lm = afterText.match(labelRe);
     if (lm) {
       label = lm[2].trim().toUpperCase();
-      // Normaliza variantes
       if (label === 'SINGLE') label = 'SGL';
       if (label === 'DOUBLE') label = 'DBL';
       if (label === 'TRIPLE') label = 'TPL';
       if (label.startsWith('SUITE')) label = 'SUITE';
     }
 
-    // Data range: DE DD A DD/MM ou DE DD/MM A DD/MM
-    let dateFrom = null, dateTo = null;
-    const dateRe = /DE\s+(\d{1,2})(?:\/(\d{1,2}))?\s+A\s+(\d{1,2})\/(\d{1,2})/i;
-    const dm = after.match(dateRe);
-    if (dm) {
-      const toMonth = parseInt(dm[4]);
-      const fromMonth = dm[2] ? parseInt(dm[2]) : toMonth;
-      dateFrom = { day: parseInt(dm[1]), month: fromMonth };
-      dateTo   = { day: parseInt(dm[3]), month: toMonth };
-    }
-
-    entries.push({ value, label, dateFrom, dateTo });
+    const assigned = dateForTRF[i];
+    entries.push({
+      value,
+      label,
+      dateFrom: assigned ? assigned.dateFrom : null,
+      dateTo: assigned ? assigned.dateTo : null,
+    });
   }
   return entries;
 }
 
 // Retorna número de adultos a partir do campo "Adt | C1 | C2" ou similar
 function parseAdultCount(adultos) {
-  if (!adultos) return 1;
+  if (!adultos) return null;
   const first = adultos.split(/[|,;]/)[0];
-  return parseInt(first?.trim()) || 1;
+  const n = parseInt(first?.trim());
+  return isNaN(n) ? null : n;
 }
 
 // Mapa de contagem de adultos para label de tarifa
@@ -259,14 +306,27 @@ function occupancyLabel(adultCount) {
   return 'SGL';
 }
 
+// Determina o label esperado usando tipoUH (mais confiável) com fallback em adultos
+function expectedOccupancyLabel(adultos, tipoUH) {
+  const uh = (tipoUH || '').toUpperCase();
+  if (/\bSGL\b|\bSINGLE\b/.test(uh)) return 'SGL';
+  if (/\bDBL\b|\bDOUBLE\b|\bTWIN\b/.test(uh)) return 'DBL';
+  if (/\bTPL\b|\bTRIPLE\b/.test(uh)) return 'TPL';
+  if (/\bSTE\b|\bSUITE\b/.test(uh)) return 'DBL';
+  const count = parseAdultCount(adultos);
+  if (count === null) return null;
+  return occupancyLabel(count);
+}
+
 /**
  * extractTRF — versão inteligente
  * @param {string} obs - campo OBSERVACOES
  * @param {string} refDate - data de referência 'YYYY-MM-DD' (data do relatório)
  * @param {string} adultos - campo "Adt | C1 | C2"
+ * @param {string} tipoUH - tipo do quarto (SGL, DBL, TPL, SUITE…)
  * @returns {number|null}
  */
-export function extractTRF(obs, refDate = null, adultos = null) {
+export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null) {
   const entries = parseTRFEntries(obs);
   if (entries.length === 0) return null;
 
@@ -291,11 +351,15 @@ export function extractTRF(obs, refDate = null, adultos = null) {
   }
 
   // ── 2. Filtra por tipo de quarto ──────────────────────────────────────────
-  const adultCount = parseAdultCount(adultos);
-  const oLabel     = occupancyLabel(adultCount);
+  const oLabel = expectedOccupancyLabel(adultos, tipoUH);
 
   const labeled = pool.filter(e => e.label !== null);
   if (labeled.length > 0) {
+    if (oLabel === null) {
+      // Sem informação de ocupação e há múltiplas tarifas — não pode determinar qual usar
+      if (labeled.length > 1) return null;
+      return labeled[0].value;
+    }
     // Tenta match exato
     const exact = labeled.find(e => {
       if (oLabel === 'SGL') return e.label === 'SGL' || e.label === 'SINGLE';
@@ -304,7 +368,8 @@ export function extractTRF(obs, refDate = null, adultos = null) {
       return false;
     });
     if (exact) return exact.value;
-    // Fallback: primeiro com label
+    // Sem match exato e há mais de uma opção — retorna null (não quer mostrar divergência errada)
+    if (labeled.length > 1) return null;
     return labeled[0].value;
   }
 
@@ -406,25 +471,75 @@ export function detectAlerts(row, cat, trfEsperado) {
 
 // ─── DATA REPORT ─────────────────────────────────────────────────────────────
 
-export function getReportRefDate(rows) {
-  const partidas = rows
-    .filter(r => r.status === 'Checkin')
-    .map(r => parseBRDate(r.partida || ''))
-    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
-    .sort();
-  return partidas[0] || new Date().toISOString().split('T')[0];
-}
-
 function addDay(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + 1);
   return d.toISOString().split('T')[0];
 }
 
+function subtractDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+// Extrai data de auditoria do nome do arquivo VHF (ex: "Reservas-15-06-26.csv" → 2026-06-15)
+function parseDateFromFilename(name) {
+  const m = (name || '').match(/(\d{2})[-_\.](\d{2})[-_\.](\d{2,4})/);
+  if (!m) return null;
+  let [, d, mo, y] = m;
+  if (y.length === 2) y = `20${y}`;
+  const dd = parseInt(d), mm = parseInt(mo), yy = parseInt(y);
+  if (dd < 1 || dd > 31 || mm < 1 || mm > 12 || yy < 2020 || yy > 2050) return null;
+  return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+// Mantido por compatibilidade; use processRows(rows, fileName) sempre que possível
+export function getReportRefDate(rows) {
+  const partidas = rows
+    .filter(r => r.status === 'Checkin')
+    .map(r => parseBRDate(r.partida || ''))
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  const minPartida = partidas[0];
+  return minPartida ? subtractDay(minPartida) : new Date().toISOString().split('T')[0];
+}
+
 // ─── PROCESSAMENTO PRINCIPAL ──────────────────────────────────────────────────
 
-export function processRows(normalizedRows) {
-  const refDate  = getReportRefDate(normalizedRows);
+export function processRows(normalizedRows, fileName = '') {
+  const checkins = normalizedRows.filter(r => r.status === 'Checkin');
+
+  // ── Determina auditDate (noite sendo auditada) ────────────────────────────
+  // 1ª prioridade: data no nome do arquivo (mais confiável — VHF sempre inclui)
+  let auditDate = parseDateFromFilename(fileName);
+
+  if (!auditDate) {
+    // 2ª: max(chegada) — último hóspede a chegar = provavelmente chegou hoje
+    const chegadas = checkins
+      .map(r => parseBRDate(r.chegada || ''))
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    const maxChegada = chegadas[chegadas.length - 1] || null;
+
+    // 3ª: dia anterior à menor partida
+    const partidas = checkins
+      .map(r => parseBRDate(r.partida || ''))
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    const minPartidaMinus1 = partidas[0] ? subtractDay(partidas[0]) : null;
+
+    // Usa o mais recente entre os dois sinais (robusto quando um está errado)
+    if (maxChegada && minPartidaMinus1) {
+      auditDate = maxChegada > minPartidaMinus1 ? maxChegada : minPartidaMinus1;
+    } else {
+      auditDate = maxChegada || minPartidaMinus1 || new Date().toISOString().split('T')[0];
+    }
+  }
+
+  // refDate = dia seguinte à auditoria = data dos checkouts "hoje cedo"
+  // nextDate = dia depois dos checkouts "amanhã"
+  const refDate  = addDay(auditDate);
   const nextDate = addDay(refDate);
 
   const rows = normalizedRows
@@ -433,8 +548,9 @@ export function processRows(normalizedRows) {
       const diaria  = parseBRNum(r.diaria);
       const partida = parseBRDate(r.partida);
       const chegada = parseBRDate(r.chegada);
-      // Passa refDate e adultos para seleção correta de TRF por data e tipo de quarto
-      const trf     = extractTRF(r.obs, refDate, r.adultos);
+      // auditDate (não refDate) para selecionar TRF da noite correta
+      // tipoUH é mais confiável que adultos para SGL/DBL/TPL quando há múltiplas tarifas
+      const trf     = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH);
       const cat     = categorize(r);
       const alerts  = detectAlerts(r, cat, trf);
       return {
@@ -458,7 +574,7 @@ export function processRows(normalizedRows) {
       tarifa: r.tarifa, obs: r.obs,
     }));
 
-  return { rows, checkouts, refDate, nextDate };
+  return { rows, checkouts, refDate, nextDate, auditDate };
 }
 
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
