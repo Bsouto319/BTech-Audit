@@ -199,6 +199,7 @@ export function parseBRDate(s) {
  *   TRF 529+5% SGL // TRF 609+5% DBL  → múltiplos por tipo
  *   TRF 2066,42 DE 15 A 16/06         → com data range
  *   TRF 2209,00 DE 15 A 16/06 - TRF 2509,00 DE 16 A 17/06  → múltiplas datas
+ *   31-08 TRF 1250 / 01-09 TRF 1500 / 02-09 TRF 1605,09    → data avulsa (dia único, sem "DE...A")
  */
 function parseTRFEntries(obs) {
   if (!obs) return [];
@@ -226,10 +227,30 @@ function parseTRFEntries(obs) {
     dateMatches.push({
       index: dm.index,
       end: dm.index + dm[0].length,
+      kind: 'range',
       dateFrom: { day: parseInt(dm[1]), month: fromMonth },
       dateTo: { day: parseInt(dm[3]), month: toMonth },
     });
   }
+
+  // Data avulsa, sem a palavra "DE" (um dia só, não uma faixa):
+  // "31-08 TRF 1250 / 01-09 TRF 1500 / 02-09 TRF 1605,09" — cada TRF vale
+  // só pra noite daquela data exata. Ignora qualquer trecho já capturado
+  // como range acima (senão o "16/06" de "DE 15 A 16/06" seria contado de
+  // novo aqui como se fosse uma data avulsa separada).
+  const singleDateRe = /\b(\d{1,2})[/-](\d{1,2})\b/g;
+  let sdm;
+  while ((sdm = singleDateRe.exec(upper)) !== null) {
+    const insideRange = dateMatches.some(r => sdm.index >= r.index && sdm.index < r.end);
+    if (insideRange) continue;
+    dateMatches.push({
+      index: sdm.index,
+      end: sdm.index + sdm[0].length,
+      kind: 'single',
+      day: { day: parseInt(sdm[1]), month: parseInt(sdm[2]) },
+    });
+  }
+  dateMatches.sort((a, b) => a.index - b.index);
 
   // Associa cada data ao TRF mais próximo (antes OU depois), nunca reaproveitando
   // a mesma data pra dois TRFs -- é isso que evita a "tarifa vizinha" ser
@@ -281,12 +302,18 @@ function parseTRFEntries(obs) {
     }
 
     const assigned = dateForTRF[i];
-    entries.push({
-      value,
-      label,
-      dateFrom: assigned ? assigned.dateFrom : null,
-      dateTo: assigned ? assigned.dateTo : null,
-    });
+    let dateFrom = null, dateTo = null, singleDay = false;
+    if (assigned) {
+      if (assigned.kind === 'single') {
+        dateFrom = assigned.day;
+        dateTo = assigned.day;
+        singleDay = true;
+      } else {
+        dateFrom = assigned.dateFrom;
+        dateTo = assigned.dateTo;
+      }
+    }
+    entries.push({ value, label, dateFrom, dateTo, singleDay });
   }
   return entries;
 }
@@ -343,6 +370,9 @@ export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null) {
       const applicable = dated.filter(e => {
         const fromMD = e.dateFrom.month * 100 + e.dateFrom.day;
         const toMD   = e.dateTo.month   * 100 + e.dateTo.day;
+        // Data avulsa ("31-08 TRF 1250") vale só pra noite exata daquele dia —
+        // diferente do range, que é [from, to) exclusivo no fim.
+        if (e.singleDay) return refMD === fromMD;
         // Range é [from, to) — diária de "15 a 16/06" vale no check-in do dia 15
         return refMD >= fromMD && refMD < toMD;
       });
