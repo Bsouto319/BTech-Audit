@@ -223,13 +223,27 @@ function parseTRFEntries(obs) {
   let dm;
   while ((dm = dateRe.exec(upper)) !== null) {
     const toMonth = parseInt(dm[4]);
-    const fromMonth = dm[2] ? parseInt(dm[2]) : toMonth;
+    const fromDay = parseInt(dm[1]);
+    const toDay = parseInt(dm[3]);
+    let fromMonth;
+    if (dm[2]) {
+      fromMonth = parseInt(dm[2]);
+    } else if (fromDay > toDay) {
+      // "DE 31 A 01/09" (sem mês no "de") e dia final menor que o dia inicial
+      // = virada de mês -- o "31" é do mês ANTERIOR ao "01/09" (31/08), nunca
+      // do mesmo mês (não existe "31 de setembro"). Sem essa correção o range
+      // ficava invertido (from > to) e nunca batia com nenhuma data real,
+      // fazendo o sistema cair no fallback errado (sempre a 1ª tarifa da lista).
+      fromMonth = toMonth === 1 ? 12 : toMonth - 1;
+    } else {
+      fromMonth = toMonth;
+    }
     dateMatches.push({
       index: dm.index,
       end: dm.index + dm[0].length,
       kind: 'range',
-      dateFrom: { day: parseInt(dm[1]), month: fromMonth },
-      dateTo: { day: parseInt(dm[3]), month: toMonth },
+      dateFrom: { day: fromDay, month: fromMonth },
+      dateTo: { day: toDay, month: toMonth },
     });
   }
 
