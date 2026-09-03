@@ -5,6 +5,8 @@ import UploadZone from '../components/UploadZone';
 import RegisterTable from '../components/RegisterTable';
 import DivergenciasTable from '../components/DivergenciasTable';
 import SaidasView from '../components/SaidasView';
+import HistoricoView from '../components/HistoricoView';
+import { saveAuditRun, checkExistingRun } from '../lib/history';
 
 function fmtDate(iso) {
   if (!iso) return '';
@@ -145,11 +147,42 @@ function Empty() {
   );
 }
 
-export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) {
-  const [page, setPage] = useState('dash');
-  const [data, setData] = useState(null);
+// Desativado de propósito: "Salvar no histórico" e "IA Insights" enviam dado de
+// hóspede/reserva pra fora do navegador (Supabase e OpenAI). Reativar só com
+// aviso/consentimento claro sobre onde o dado vai parar.
+const HISTORICO_E_IA_DESATIVADOS = true;
 
-  const reportDate = data?.refDate ? fmtDate(data.refDate) : null;
+export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) {
+  const [page,       setPage]       = useState('dash');
+  const [data,       setData]       = useState(null);
+  const [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'exists' | 'error'
+
+  const reportDate = data?.auditDate ? fmtDate(data.auditDate) : null;
+
+  async function handleSave() {
+    if (!data || !data.auditDate) return;
+    setSaveStatus('saving');
+    try {
+      const existing = await checkExistingRun(data.auditDate);
+      if (existing) { setSaveStatus('exists'); return; }
+      await saveAuditRun({
+        fileName:   data.fileName,
+        auditDate:  data.auditDate,
+        schemaName: data.schema,
+        rows:       data.rows,
+        hotelName:  profile?.hotel_name,
+      });
+      setSaveStatus('saved');
+    } catch (e) {
+      console.error('save error', e);
+      setSaveStatus('error');
+    }
+  }
+
+  function handleNewData(d) {
+    setData(d);
+    setSaveStatus(null);
+  }
 
   return (
     <div style={{
@@ -199,6 +232,20 @@ export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) 
                 {reportDate}
               </span>
             )}
+            {!HISTORICO_E_IA_DESATIVADOS && data && saveStatus !== 'saved' && (
+              <button onClick={handleSave} disabled={saveStatus === 'saving' || saveStatus === 'exists'} style={{
+                padding: '4px 12px', borderRadius: 5, border: '1px solid rgba(38,208,124,.3)',
+                background: saveStatus === 'exists' ? 'rgba(232,168,56,.08)' : 'rgba(38,208,124,.08)',
+                color: saveStatus === 'exists' ? 'var(--accent)' : 'var(--green)',
+                fontFamily: 'inherit', fontWeight: 600, fontSize: '.63rem', cursor: saveStatus === 'saving' ? 'default' : 'pointer',
+                opacity: saveStatus === 'saving' ? .6 : 1, transition: 'all .15s',
+              }}>
+                {saveStatus === 'saving' ? 'Salvando...' : saveStatus === 'exists' ? 'Já salvo nessa data' : saveStatus === 'error' ? 'Erro — tentar de novo' : '↑ Salvar no histórico'}
+              </button>
+            )}
+            {saveStatus === 'saved' && (
+              <span style={{ color: 'var(--green)', fontSize: '.65rem', fontFamily: 'var(--mono)', fontWeight: 600 }}>✓ Salvo no histórico</span>
+            )}
             <span style={{
               background: 'var(--bg3)', color: 'var(--text3)', border: '1px solid var(--border)',
               borderRadius: 5, padding: '3px 10px', fontSize: '.65rem', fontFamily: 'var(--mono)',
@@ -222,7 +269,7 @@ export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) 
               title="Carregar Relatório VHF"
               right={<span style={{ fontSize: '.63rem', color: 'var(--text3)', fontFamily: 'var(--mono)' }}>Consulta Geral · CSV</span>}
             >
-              <UploadZone onData={setData} />
+              <UploadZone onData={handleNewData} />
             </Section>
             {data?.kpis?.divergencias > 0 && (
               <div onClick={() => setPage('div')} style={{
@@ -279,7 +326,14 @@ export default function Dashboard({ profile, onSignOut, isAdmin, onOpenAdmin }) 
           </div>
         )}
 
-        {page === 'ai' && (
+        {!HISTORICO_E_IA_DESATIVADOS && page === 'hist' && (
+          <div>
+            <PageTitle title="Histórico de Hospedagem" sub="Ranking de hóspedes, tendências de receita e ADR por período" />
+            <HistoricoView />
+          </div>
+        )}
+
+        {!HISTORICO_E_IA_DESATIVADOS && page === 'ai' && (
           <div>
             <PageTitle title="IA Insights" sub="Análise inteligente via OpenAI — requer API Key" />
             <AiInsights data={data} />

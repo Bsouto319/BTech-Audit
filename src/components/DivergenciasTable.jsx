@@ -21,7 +21,7 @@ export default function DivergenciasTable({ rows }) {
   const divs = useMemo(() =>
     rows.filter(r => r.trf !== null && Math.abs(r.diaria - r.trf) > 1)
         .map(r => ({ ...r, diff: r.diaria - r.trf, absDiff: Math.abs(r.diaria - r.trf) }))
-        .sort((a, b) => b.absDiff - a.absDiff),
+        .sort((a, b) => parseInt(a.uh) - parseInt(b.uh)),
     [rows]
   );
 

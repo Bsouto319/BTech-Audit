@@ -39,6 +39,13 @@ const ICONS = {
       <line x1="9.5" y1="7.5" x2="14" y2="7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
     </svg>
   ),
+  hist: (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path d="M7.5 1.5A6 6 0 1 1 1.5 7.5H1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M1 4.5L1.5 7.5L4.5 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M7.5 4.5V8L9.5 9.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
   cfg: (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
       <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
@@ -58,7 +65,9 @@ export default function Sidebar({ page, setPage, hotelName, onSignOut, onOpenAdm
     { id: 'reg',  label: 'Registros' },
     { id: 'div',  label: 'Divergências', badge: alerts?.divergencias },
     { id: 'sai',  label: 'Saídas',       badge: alerts?.saidasHoje },
-    { id: 'ai',   label: 'IA Insights' },
+    // 'hist' (Histórico) e 'ai' (IA Insights) desativados de propósito: as duas enviam
+    // dado de hóspede/reserva pra fora do navegador (Supabase e OpenAI, respectivamente).
+    // Reativar só com aviso/consentimento claro sobre onde o dado vai parar.
     { id: 'cfg',  label: 'Config' },
   ];
 
