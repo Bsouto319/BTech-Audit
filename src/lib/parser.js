@@ -214,11 +214,13 @@ function parseTRFEntries(obs) {
   }
   if (matches.length === 0) return [];
 
-  // Data range: aceita "DE DD A DD/MM", "DE DD/MM A DD/MM" e "DE DD/MM-DD/MM"
-  // (hífen como separador é tão comum no PMS quanto a palavra "A"). Pode vir
-  // antes ("DE 24/08-25/08 TRF 1.250,00") ou depois ("TRF 2209,00 DE 15 A 16/06")
+  // Data range: aceita "DE DD A DD/MM", "DE DD/MM A DD/MM", "DE DD/MM-DD/MM"
+  // e também DD.MM com ponto em vez de barra ("DE 31 A 01.09") -- já vimos os
+  // dois no mesmo PMS, depende de quem digitou a observação. Hífen como
+  // separador de range é tão comum quanto a palavra "A". Pode vir antes
+  // ("DE 24/08-25/08 TRF 1.250,00") ou depois ("TRF 2209,00 DE 15 A 16/06")
   // do valor, dependendo de como o PMS exportou.
-  const dateRe = /DE\s+(\d{1,2})(?:\/(\d{1,2}))?\s*(?:A|-)\s*(\d{1,2})\/(\d{1,2})/gi;
+  const dateRe = /DE\s+(\d{1,2})(?:[/.](\d{1,2}))?\s*(?:A|-)\s*(\d{1,2})[/.](\d{1,2})/gi;
   const dateMatches = [];
   let dm;
   while ((dm = dateRe.exec(upper)) !== null) {
@@ -252,7 +254,7 @@ function parseTRFEntries(obs) {
   // só pra noite daquela data exata. Ignora qualquer trecho já capturado
   // como range acima (senão o "16/06" de "DE 15 A 16/06" seria contado de
   // novo aqui como se fosse uma data avulsa separada).
-  const singleDateRe = /\b(\d{1,2})[/-](\d{1,2})\b/g;
+  const singleDateRe = /\b(\d{1,2})[/.-](\d{1,2})\b/g;
   let sdm;
   while ((sdm = singleDateRe.exec(upper)) !== null) {
     const insideRange = dateMatches.some(r => sdm.index >= r.index && sdm.index < r.end);
