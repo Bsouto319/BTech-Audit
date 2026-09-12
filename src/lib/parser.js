@@ -271,6 +271,15 @@ function parseTRFEntries(obs) {
   // Associa cada data ao TRF mais próximo (antes OU depois), nunca reaproveitando
   // a mesma data pra dois TRFs -- é isso que evita a "tarifa vizinha" ser
   // roubada quando há múltiplas diárias diferentes na mesma observação.
+  //
+  // MAX_DATE_DISTANCE evita pegar uma data de outro assunto da observação
+  // (ex: "TRF 469,00 SGL - TRF 549,00 DBL // PAX ASSINA EXTRATO NO CHECK-OUT
+  // AUTORIZADO ALMOÇO DO DIA 11.09") -- essa "11.09" é a data do almoço
+  // liberado, não da tarifa, mas sem limite de distância ela "roubava" a
+  // tarifa DBL mais próxima, fazendo o sistema achar que aquele TRF só vale
+  // pro dia 11 e descartar a tarifa SGL correta do pool. Todo caso real de
+  // data-de-tarifa observado até hoje fica a poucos caracteres (~0-3) do TRF.
+  const MAX_DATE_DISTANCE = 20;
   const dateForTRF = new Array(matches.length).fill(null);
   const usedDates = new Set();
   for (let i = 0; i < matches.length; i++) {
@@ -290,7 +299,7 @@ function parseTRFEntries(obs) {
       }
       if (dist < bestDist) { bestDist = dist; best = j; }
     }
-    if (best !== null) {
+    if (best !== null && bestDist <= MAX_DATE_DISTANCE) {
       dateForTRF[i] = dateMatches[best];
       usedDates.add(best);
     }
@@ -372,6 +381,29 @@ function expectedOccupancyLabel(adultos, tipoUH) {
 export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null) {
   const entries = parseTRFEntries(obs);
   if (entries.length === 0) return null;
+
+  // ── 0. Tipo de UH não padrão com tarifa própria nomeada (ex: "JED") ───────
+  // Quando o tipo de quarto não é SGL/DBL/TPL/SUITE (ex: "JED" — Junior
+  // Suite/categoria própria do hotel), o labelRe não reconhece o nome da
+  // tarifa ("TRF 1.299,00+5% JED DUPLO") e o rótulo fica null — cai no
+  // fallback por quantidade de adultos, que pode escolher SGL/DBL errado
+  // mesmo tendo uma tarifa nomeada específica pro tipo de quarto certo bem
+  // ali na observação. Se o próprio código do tipo de UH aparecer citado
+  // perto de um TRF, essa é a tarifa certa — mais confiável que adivinhar
+  // por ocupação.
+  if (tipoUH) {
+    const uhCode = (tipoUH.split(/[\s/]+/)[0] || '').toUpperCase().trim();
+    if (uhCode && !/^(SGL|DBL|TPL|STE|SUITE)$/.test(uhCode)) {
+      // até 20 chars entre o valor e o código -- não pode ser [^0-9], porque
+      // o "+5%" do adicional de comissão tem dígito no meio ("TRF 1.299,00+5% JED")
+      const codeRe = new RegExp('TRF\\s*(?:R\\$\\s*)?(\\d+(?:\\.\\d{3})*(?:,\\d{1,2})?).{0,20}?\\b' + uhCode + '\\b', 'i');
+      const codeMatch = obs.toUpperCase().match(codeRe);
+      if (codeMatch) {
+        const codeValue = parseBRNum(codeMatch[1]);
+        if (codeValue >= 10) return codeValue;
+      }
+    }
+  }
 
   // ── 1. Filtra por data de referência ──────────────────────────────────────
   let pool = entries;
