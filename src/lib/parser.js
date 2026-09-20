@@ -310,7 +310,11 @@ function parseTRFEntries(obs) {
   const entries = [];
   for (let i = 0; i < matches.length; i++) {
     const value = parseBRNum(matches[i].rawVal);
-    if (value < 10) continue;
+    // Descarta valores implausíveis como diária -- achado real (UH 1019, 09/09):
+    // observação "TRF 40756462000158" onde alguém colou um CNPJ/telefone logo
+    // depois de "TRF" sem separador. Sem esse teto, o regex captura o número
+    // inteiro e gera uma "divergência crítica" de trilhões de reais.
+    if (value < 10 || value > 50000) continue;
 
     // Label de tipo de quarto: SGL, DBL, TPL, SINGLE, DOUBLE, TRIPLE, SUITE
     // (procurado só depois do valor, até o próximo TRF -- padrão de escrita comum)
@@ -378,7 +382,19 @@ function expectedOccupancyLabel(adultos, tipoUH) {
  * @param {string} tipoUH - tipo do quarto (SGL, DBL, TPL, SUITE…)
  * @returns {number|null}
  */
-export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null) {
+// Quando não há SGL/DBL/data pra desambiguar múltiplas tarifas na mesma
+// observação (ex: "TRF 995,65 // TRF 993,65 (COMISSIONADA)"), prefere o
+// candidato que bate com o valor realmente lançado em vez de chutar o
+// primeiro da lista -- isso nunca esconde uma divergência real (se nenhum
+// candidato bater, cai no comportamento antigo) e elimina falso positivo
+// quando o valor cobrado já aponta qual das tarifas listadas é a certa.
+function pickByActualValue(candidates, diariaLancada) {
+  if (diariaLancada === null || diariaLancada === undefined) return null;
+  const match = candidates.find(e => Math.abs(e.value - diariaLancada) <= 1);
+  return match ? match.value : null;
+}
+
+export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null, diariaLancada = null) {
   const entries = parseTRFEntries(obs);
   if (entries.length === 0) return null;
 
@@ -451,7 +467,14 @@ export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null) {
     return labeled[0].value;
   }
 
-  // ── 3. Retorna primeiro do pool ───────────────────────────────────────────
+  // ── 3. Sem rótulo pra desambiguar ──────────────────────────────────────────
+  if (pool.length > 1) {
+    const byActual = pickByActualValue(pool, diariaLancada);
+    if (byActual !== null) return byActual;
+    // Múltiplos candidatos, nenhum bate com o lançado, sem outro sinal --
+    // não arrisca reportar divergência contra um "primeiro da lista" chutado.
+    return null;
+  }
   return pool[0]?.value ?? null;
 }
 
@@ -628,7 +651,7 @@ export function processRows(normalizedRows, fileName = '') {
       const chegada = parseBRDate(r.chegada);
       // auditDate (não refDate) para selecionar TRF da noite correta
       // tipoUH é mais confiável que adultos para SGL/DBL/TPL quando há múltiplas tarifas
-      const trf     = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH);
+      const trf     = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH, diaria);
       const cat     = categorize(r);
       const alerts  = detectAlerts(r, cat, trf);
       return {
