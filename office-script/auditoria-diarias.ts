@@ -230,7 +230,13 @@ function parseTRFEntries(obs: string, tariffKeyword: string): TRFEntry[] {
     }
   }
 
-  const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE))?)/i
+  // Achado real 20/09 (UH 1903 e outras 21): observação escreve "DUPLO" em vez
+  // de "DBL"/"DOUBLE" (o VHF mistura inglês e português no mesmo texto -- ex:
+  // "TRF 559,00 SINGLE // TRF 619,00 DUPLO"). Sem reconhecer "DUPLO"/"TRIPLO",
+  // só o candidato em inglês tinha rótulo, e o sistema devolvia ele mesmo pra
+  // quem estava no quarto duplo -- daí a diária certa (619) sempre "divergia"
+  // contra o valor do single (559).
+  const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|DUPLO|TRIPLO|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|DUPLO|TRIPLO))?)/i
 
   const entries: TRFEntry[] = []
   for (let i = 0; i < matches.length; i++) {
@@ -248,8 +254,8 @@ function parseTRFEntries(obs: string, tariffKeyword: string): TRFEntry[] {
     if (lm) {
       label = lm[2].trim().toUpperCase()
       if (label === 'SINGLE') label = 'SGL'
-      if (label === 'DOUBLE') label = 'DBL'
-      if (label === 'TRIPLE') label = 'TPL'
+      if (label === 'DOUBLE' || label === 'DUPLO') label = 'DBL'
+      if (label === 'TRIPLE' || label === 'TRIPLO') label = 'TPL'
       if (label.startsWith('SUITE')) label = 'SUITE'
     }
 
@@ -499,5 +505,28 @@ function main(workbook: ExcelScript.Workbook, fileName: string = ''): string {
   const criticas = resultados.filter(r => r.severidade === 'CRÍTICA')
 
   const resumo = `Auditoria de diárias (${auditDate}): ${resultados.length} check-ins, ${divergencias.length} divergência(s), ${criticas.length} crítica(s).`
-  return resumo
+
+  // Detalhe das divergências direto na mensagem do Teams -- sem isso, quem
+  // audita precisa abrir a planilha e a aba Auditoria só pra saber qual UH
+  // corrigir no VHF. Ordenado por diferença (maior primeiro), até 15 linhas
+  // pra não virar uma mensagem gigante numa noite ruim.
+  let detalhe = ''
+  if (divergencias.length > 0) {
+    const ordenadas = [...divergencias].sort((a, b) => (b.diferenca ?? 0) - (a.diferenca ?? 0))
+    const emoji = (sev: string) => sev === 'CRÍTICA' ? '🔴' : sev === 'ALTA' ? '🟠' : '🟡'
+    const linhas = ordenadas.slice(0, 15).map((r) =>
+      `${emoji(r.severidade)} UH ${r.uh} - ${r.nome} | Lançado R$ ${formatBRL(r.diaria)} → Esperado R$ ${formatBRL(r.trf ?? 0)} (dif. R$ ${formatBRL(r.diferenca ?? 0)})`
+    )
+    if (ordenadas.length > 15) linhas.push(`... e mais ${ordenadas.length - 15} divergência(s) — ver aba Auditoria.`)
+    detalhe = '\n\n' + linhas.join('\n')
+  }
+
+  return resumo + detalhe
+}
+
+function formatBRL(n: number): string {
+  const fixed = n.toFixed(2).replace('.', ',')
+  const [intPart, decPart] = fixed.split(',')
+  const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  return intFormatted + ',' + decPart
 }

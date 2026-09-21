@@ -305,7 +305,13 @@ function parseTRFEntries(obs) {
     }
   }
 
-  const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE))?)/i;
+  // Achado real 20/09 (UH 1903 e outras 21): observação escreve "DUPLO" em vez
+  // de "DBL"/"DOUBLE" (o VHF mistura inglês e português no mesmo texto -- ex:
+  // "TRF 559,00 SINGLE // TRF 619,00 DUPLO"). Sem reconhecer "DUPLO"/"TRIPLO",
+  // só o candidato em inglês tinha rótulo, e o sistema devolvia ele mesmo pra
+  // quem estava no quarto duplo -- daí a diária certa (619) sempre "divergia"
+  // contra o valor do single (559).
+  const labelRe = /[\s+%]*([+]?\s*\d+%\s*)?(SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|DUPLO|TRIPLO|SUITE(?:\s+(?:SGL|DBL|TPL|SINGLE|DOUBLE|TRIPLE|DUPLO|TRIPLO))?)/i;
 
   const entries = [];
   for (let i = 0; i < matches.length; i++) {
@@ -325,8 +331,8 @@ function parseTRFEntries(obs) {
     if (lm) {
       label = lm[2].trim().toUpperCase();
       if (label === 'SINGLE') label = 'SGL';
-      if (label === 'DOUBLE') label = 'DBL';
-      if (label === 'TRIPLE') label = 'TPL';
+      if (label === 'DOUBLE' || label === 'DUPLO') label = 'DBL';
+      if (label === 'TRIPLE' || label === 'TRIPLO') label = 'TPL';
       if (label.startsWith('SUITE')) label = 'SUITE';
     }
 
