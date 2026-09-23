@@ -52,6 +52,7 @@ interface TRFEntry {
   dateFrom: { day: number; month: number } | null
   dateTo: { day: number; month: number } | null
   singleDay: boolean
+  uhRef: string | null
 }
 
 interface Alert { type: string; severity: string; diff?: number; expected?: number; actual?: number }
@@ -273,7 +274,16 @@ function parseTRFEntries(obs: string, tariffKeyword: string): TRFEntry[] {
         dateTo = assigned.dateTo!
       }
     }
-    entries.push({ value, label, dateFrom, dateTo, singleDay })
+    // UH entre parênteses logo após a tarifa -- achado real (UH 0610, 22/09):
+    // "TRF 4500+5% SGL (1902) // TRF 1.399 + 5% SGL (THE LEVEL PREMIUM)". O
+    // "(1902)" é o número de uma RESERVA FUTURA diferente (mudança de quarto
+    // já agendada, mencionada mais adiante na mesma observação), não desta
+    // UH -- mas antes disso o sistema tratava como se fosse uma tarifa válida
+    // pra UH atual, e ela "ganhava" o desempate por ser a primeira da lista.
+    const uhRefMatch = afterText.slice(0, 40).match(/\(\s*(\d{3,5})\s*\)/)
+    const uhRef = uhRefMatch ? uhRefMatch[1] : null
+
+    entries.push({ value, label, dateFrom, dateTo, singleDay, uhRef })
   }
   return entries
 }
@@ -313,9 +323,28 @@ function pickByActualValue(candidates: TRFEntry[], diariaLancada: number | null)
   return match ? match.value : null
 }
 
-function extractTRF(obs: string, refDate: string | null, adultos: string, tipoUH: string, tariffKeyword: string, diariaLancada: number | null = null): number | null {
-  const entries = parseTRFEntries(obs, tariffKeyword)
+function extractTRF(obs: string, refDate: string | null, adultos: string, tipoUH: string, tariffKeyword: string, diariaLancada: number | null = null, uh: string | null = null): number | null {
+  let entries = parseTRFEntries(obs, tariffKeyword)
   if (entries.length === 0) return null
+
+  // ── Descarta tarifas anotadas com o número de OUTRA UH entre parênteses ──
+  // Achado real (UH 0610, 22/09): a observação tinha "TRF 4500+5% SGL (1902)"
+  // -- a tarifa de uma reserva futura em OUTRA UH, citada na mesma observação
+  // porque o hóspede vai trocar de quarto depois -- e "TRF 1.399 + 5% SGL
+  // (THE LEVEL PREMIUM)", a tarifa real desta UH. Sem esse filtro, a de 4500
+  // "ganhava" por ser a primeira da lista, virando uma divergência de milhares
+  // de reais que não existe. Só filtra quando sobra pelo menos 1 candidato
+  // depois -- nunca zera o pool inteiro por causa disso.
+  if (uh) {
+    const uhNum = parseInt(String(uh).replace(/\D/g, ''), 10)
+    if (!isNaN(uhNum)) {
+      const filtered = entries.filter(e => {
+        if (!e.uhRef) return true
+        return parseInt(e.uhRef, 10) === uhNum
+      })
+      if (filtered.length > 0) entries = filtered
+    }
+  }
 
   if (tipoUH) {
     const uhCode = (tipoUH.split(/[\s/]+/)[0] || '').toUpperCase().trim()
@@ -355,13 +384,24 @@ function extractTRF(obs: string, refDate: string | null, adultos: string, tipoUH
       if (labeled.length > 1) return null
       return labeled[0].value
     }
-    const exact = labeled.find(e => {
+    const exact = labeled.filter(e => {
       if (oLabel === 'SGL') return e.label === 'SGL' || e.label === 'SINGLE'
       if (oLabel === 'DBL') return e.label === 'DBL' || e.label === 'DOUBLE' || e.label === 'SUITE'
       if (oLabel === 'TPL') return e.label === 'TPL' || e.label === 'TRIPLE'
       return false
     })
-    if (exact) return exact.value
+    if (exact.length > 1) {
+      // Achado real (UH 0818, 22/09): "TRF 789,00 SGL DELUXE // TRF 1000,00
+      // SGL TL JUNIOR" -- as duas têm o mesmo rótulo de ocupação (SGL), só a
+      // categoria do quarto muda (o labelRe não distingue DELUXE de TL
+      // JUNIOR). Sem desempate, pegava sempre a 1ª da lista (789), mesmo o
+      // valor lançado batendo certinho com a 2ª (1000). Prefere a que bate
+      // com o valor lançado antes de chutar a 1ª.
+      const byActual = pickByActualValue(exact, diariaLancada)
+      if (byActual !== null) return byActual
+      return exact[0].value
+    }
+    if (exact.length === 1) return exact[0].value
     if (labeled.length > 1) return null
     return labeled[0].value
   }
@@ -458,7 +498,7 @@ function main(workbook: ExcelScript.Workbook, fileName: string = ''): string {
   const resultados: ResultRow[] = []
   for (const r of checkins) {
     const diaria = parseBRNum(r.diaria)
-    const trf = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH, schema.tariffKeyword, diaria)
+    const trf = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH, schema.tariffKeyword, diaria, r.uh)
     const cat = categorize(r)
     const diff = trf !== null ? Math.abs(diaria - trf) : null
     resultados.push({
@@ -504,24 +544,46 @@ function main(workbook: ExcelScript.Workbook, fileName: string = ''): string {
   const divergencias = resultados.filter(r => r.severidade)
   const criticas = resultados.filter(r => r.severidade === 'CRÍTICA')
 
-  const resumo = `Auditoria de diárias (${auditDate}): ${resultados.length} check-ins, ${divergencias.length} divergência(s), ${criticas.length} crítica(s).`
+  // Mensagem em HTML -- o Teams renderiza como tabela de verdade (borda,
+  // cabeçalho, cor por severidade) em vez de um bloco de texto com emoji.
+  // A ação "Postar mensagem" no Power Automate precisa estar configurada
+  // pra tratar o corpo como HTML, não texto simples.
+  const corSeveridade = (sev: string) => sev === 'CRÍTICA' ? '#F4C7C3' : sev === 'ALTA' ? '#FCE8B2' : '#FFF2CC'
+  const emoji = (sev: string) => sev === 'CRÍTICA' ? '🔴' : sev === 'ALTA' ? '🟠' : '🟡'
 
-  // Detalhe das divergências direto na mensagem do Teams -- sem isso, quem
-  // audita precisa abrir a planilha e a aba Auditoria só pra saber qual UH
-  // corrigir no VHF. Ordenado por diferença (maior primeiro), até 15 linhas
-  // pra não virar uma mensagem gigante numa noite ruim.
-  let detalhe = ''
+  let tabelaDivergencias = ''
   if (divergencias.length > 0) {
     const ordenadas = [...divergencias].sort((a, b) => (b.diferenca ?? 0) - (a.diferenca ?? 0))
-    const emoji = (sev: string) => sev === 'CRÍTICA' ? '🔴' : sev === 'ALTA' ? '🟠' : '🟡'
-    const linhas = ordenadas.slice(0, 15).map((r) =>
-      `${emoji(r.severidade)} UH ${r.uh} - ${r.nome} | Lançado R$ ${formatBRL(r.diaria)} → Esperado R$ ${formatBRL(r.trf ?? 0)} (dif. R$ ${formatBRL(r.diferenca ?? 0)})`
-    )
-    if (ordenadas.length > 15) linhas.push(`... e mais ${ordenadas.length - 15} divergência(s) — ver aba Auditoria.`)
-    detalhe = '\n\n' + linhas.join('\n')
+    const linhas = ordenadas.slice(0, 30).map((r) => `
+      <tr style="background-color:${corSeveridade(r.severidade)}">
+        <td style="padding:4px 8px;border:1px solid #ccc">${emoji(r.severidade)} ${r.uh}</td>
+        <td style="padding:4px 8px;border:1px solid #ccc">${r.nome}</td>
+        <td style="padding:4px 8px;border:1px solid #ccc">R$ ${formatBRL(r.diaria)}</td>
+        <td style="padding:4px 8px;border:1px solid #ccc">R$ ${formatBRL(r.trf ?? 0)}</td>
+        <td style="padding:4px 8px;border:1px solid #ccc"><b>R$ ${formatBRL(r.diferenca ?? 0)}</b></td>
+      </tr>`).join('')
+    const rodape = ordenadas.length > 30
+      ? `<p><i>... e mais ${ordenadas.length - 30} divergência(s) -- ver aba Auditoria na planilha.</i></p>`
+      : ''
+    tabelaDivergencias = `
+      <h4>Divergências de tarifa</h4>
+      <table style="border-collapse:collapse;font-size:13px">
+        <tr style="background-color:#1F2529;color:#fff">
+          <th style="padding:4px 8px;border:1px solid #ccc">UH</th>
+          <th style="padding:4px 8px;border:1px solid #ccc">Hóspede</th>
+          <th style="padding:4px 8px;border:1px solid #ccc">Lançado</th>
+          <th style="padding:4px 8px;border:1px solid #ccc">Esperado</th>
+          <th style="padding:4px 8px;border:1px solid #ccc">Diferença</th>
+        </tr>
+        ${linhas}
+      </table>
+      ${rodape}`
   }
 
-  return resumo + detalhe
+  return `
+    <h3>📋 Auditoria de diárias — ${auditDate}</h3>
+    <p><b>${resultados.length}</b> check-ins &nbsp;·&nbsp; <b>${divergencias.length}</b> divergência(s) de tarifa &nbsp;·&nbsp; <b>${criticas.length}</b> crítica(s)</p>
+    ${tabelaDivergencias}`
 }
 
 function formatBRL(n: number): string {

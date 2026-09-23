@@ -348,7 +348,16 @@ function parseTRFEntries(obs) {
         dateTo = assigned.dateTo;
       }
     }
-    entries.push({ value, label, dateFrom, dateTo, singleDay });
+    // UH entre parênteses logo após a tarifa -- achado real (UH 0610, 22/09):
+    // "TRF 4500+5% SGL (1902) // TRF 1.399 + 5% SGL (THE LEVEL PREMIUM)". O
+    // "(1902)" é o número de uma RESERVA FUTURA diferente (mudança de quarto
+    // já agendada, mencionada mais adiante na mesma observação), não desta
+    // UH -- mas antes disso o sistema tratava como se fosse uma tarifa válida
+    // pra UH atual, e ela "ganhava" o desempate por ser a primeira da lista.
+    const uhRefMatch = afterText.slice(0, 40).match(/\(\s*(\d{3,5})\s*\)/);
+    const uhRef = uhRefMatch ? uhRefMatch[1] : null;
+
+    entries.push({ value, label, dateFrom, dateTo, singleDay, uhRef });
   }
   return entries;
 }
@@ -400,9 +409,28 @@ function pickByActualValue(candidates, diariaLancada) {
   return match ? match.value : null;
 }
 
-export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null, diariaLancada = null) {
-  const entries = parseTRFEntries(obs);
+export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null, diariaLancada = null, uh = null) {
+  let entries = parseTRFEntries(obs);
   if (entries.length === 0) return null;
+
+  // ── -1. Descarta tarifas anotadas com o número de OUTRA UH entre parênteses ──
+  // Achado real (UH 0610, 22/09): a observação tinha "TRF 4500+5% SGL (1902)"
+  // -- a tarifa de uma reserva futura em OUTRA UH, citada na mesma observação
+  // porque o hóspede vai trocar de quarto depois -- e "TRF 1.399 + 5% SGL
+  // (THE LEVEL PREMIUM)", a tarifa real desta UH. Sem esse filtro, a de 4500
+  // "ganhava" por ser a primeira da lista, virando uma divergência de milhares
+  // de reais que não existe. Só filtra quando sobra pelo menos 1 candidato
+  // depois -- nunca zera o pool inteiro por causa disso.
+  if (uh) {
+    const uhNum = parseInt(String(uh).replace(/\D/g, ''), 10);
+    if (!isNaN(uhNum)) {
+      const filtered = entries.filter(e => {
+        if (!e.uhRef) return true;
+        return parseInt(e.uhRef, 10) === uhNum;
+      });
+      if (filtered.length > 0) entries = filtered;
+    }
+  }
 
   // ── 0. Tipo de UH não padrão com tarifa própria nomeada (ex: "JED") ───────
   // Quando o tipo de quarto não é SGL/DBL/TPL/SUITE (ex: "JED" — Junior
@@ -461,13 +489,24 @@ export function extractTRF(obs, refDate = null, adultos = null, tipoUH = null, d
       return labeled[0].value;
     }
     // Tenta match exato
-    const exact = labeled.find(e => {
+    const exact = labeled.filter(e => {
       if (oLabel === 'SGL') return e.label === 'SGL' || e.label === 'SINGLE';
       if (oLabel === 'DBL') return e.label === 'DBL' || e.label === 'DOUBLE' || e.label === 'SUITE';
       if (oLabel === 'TPL') return e.label === 'TPL' || e.label === 'TRIPLE';
       return false;
     });
-    if (exact) return exact.value;
+    if (exact.length > 1) {
+      // Achado real (UH 0818, 22/09): "TRF 789,00 SGL DELUXE // TRF 1000,00
+      // SGL TL JUNIOR" -- as duas têm o mesmo rótulo de ocupação (SGL), só a
+      // categoria do quarto muda (o labelRe não distingue DELUXE de TL
+      // JUNIOR). Sem desempate, pegava sempre a 1ª da lista (789), mesmo o
+      // valor lançado batendo certinho com a 2ª (1000). Prefere a que bate
+      // com o valor lançado antes de chutar a 1ª.
+      const byActual = pickByActualValue(exact, diariaLancada);
+      if (byActual !== null) return byActual;
+      return exact[0].value;
+    }
+    if (exact.length === 1) return exact[0].value;
     // Sem match exato e há mais de uma opção — retorna null (não quer mostrar divergência errada)
     if (labeled.length > 1) return null;
     return labeled[0].value;
@@ -657,7 +696,7 @@ export function processRows(normalizedRows, fileName = '') {
       const chegada = parseBRDate(r.chegada);
       // auditDate (não refDate) para selecionar TRF da noite correta
       // tipoUH é mais confiável que adultos para SGL/DBL/TPL quando há múltiplas tarifas
-      const trf     = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH, diaria);
+      const trf     = extractTRF(r.obs, auditDate, r.adultos, r.tipoUH, diaria, r.uh);
       const cat     = categorize(r);
       const alerts  = detectAlerts(r, cat, trf);
       return {
