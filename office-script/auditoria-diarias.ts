@@ -455,14 +455,33 @@ function subtractDay(dateStr: string): string {
   return d.toISOString().split('T')[0]
 }
 
-function parseDateFromFilename(name: string): string | null {
-  const m = (name || '').match(/(\d{2})[-_.](\d{2})[-_.](\d{2,4})/)
-  if (!m) return null
-  let d = m[1], mo = m[2], y = m[3]
-  if (y.length === 2) y = `20${y}`
-  const dd = parseInt(d), mm = parseInt(mo), yy = parseInt(y)
-  if (dd < 1 || dd > 31 || mm < 1 || mm > 12 || yy < 2020 || yy > 2050) return null
-  return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`
+// Achado real 23/09: o próprio manual dá "Consulta Geral de Reservas 09 09.csv"
+// como exemplo válido (dia e mês separados por ESPAÇO, sem ano -- é assim que
+// o VHF nomeia o export), mas o regex só aceitava "-", "_" ou "." como
+// separador e sempre exigia um terceiro número (ano). Isso significa que a
+// extração de data pelo nome do arquivo nunca funcionou de verdade -- todo
+// arquivo processado até hoje caiu no fallback (adivinhar pela chegada das
+// próprias reservas), sem ninguém perceber. Também não dava pra forçar de
+// propósito qual dia reauditar renomeando o arquivo -- o sistema sempre
+// escolhia sozinho.
+interface FilenameDate { date?: string; day?: number; month?: number }
+function parseDateFromFilename(name: string): FilenameDate | null {
+  const s = name || ''
+  const full = s.match(/(\d{1,2})[-_.\s](\d{1,2})[-_.\s](\d{2,4})(?!\d)/)
+  if (full) {
+    let d = full[1], mo = full[2], y = full[3]
+    if (y.length === 2) y = `20${y}`
+    const dd = parseInt(d), mm = parseInt(mo), yy = parseInt(y)
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12 && yy >= 2020 && yy <= 2050) {
+      return { date: `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}` }
+    }
+  }
+  const short = s.match(/(?:^|\D)(\d{1,2})[-_.\s](\d{1,2})(?:\D|$)/)
+  if (short) {
+    const dd = parseInt(short[1]), mm = parseInt(short[2])
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) return { day: dd, month: mm }
+  }
+  return null
 }
 
 // ============================================================================
@@ -489,10 +508,29 @@ function main(workbook: ExcelScript.Workbook, fileName: string = ''): string {
 
   const checkins = normalized.filter(r => r.status === 'Checkin')
 
-  let auditDate = parseDateFromFilename(fileName)
-  if (!auditDate) {
-    const chegadas = checkins.map(r => parseBRDate(r.chegada)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort()
-    auditDate = chegadas[chegadas.length - 1] || new Date().toISOString().split('T')[0]
+  // Sinais das próprias reservas — usados no fallback completo E pra resolver
+  // o ano quando o nome do arquivo só traz dia e mês (o VHF nunca bota ano).
+  const chegadas = checkins.map(r => parseBRDate(r.chegada)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort()
+  const maxChegada = chegadas[chegadas.length - 1] || null
+  const partidas = checkins.map(r => parseBRDate(r.partida)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort()
+  const minPartidaMinus1 = partidas[0] ? subtractDay(partidas[0]) : null
+  const fallbackDate = (): string => {
+    if (maxChegada && minPartidaMinus1) return maxChegada > minPartidaMinus1 ? maxChegada : minPartidaMinus1
+    return maxChegada || minPartidaMinus1 || new Date().toISOString().split('T')[0]
+  }
+
+  // 1ª prioridade: data no nome do arquivo — dá controle de propósito pra
+  // reauditar um dia específico (inclusive passado) renomeando o arquivo
+  // antes de soltar na pasta, em vez de depender só do que o sistema adivinha.
+  let auditDate: string
+  const fromName = parseDateFromFilename(fileName)
+  if (fromName?.date) {
+    auditDate = fromName.date
+  } else if (fromName?.day && fromName?.month) {
+    const year = fallbackDate().slice(0, 4)
+    auditDate = `${year}-${String(fromName.month).padStart(2, '0')}-${String(fromName.day).padStart(2, '0')}`
+  } else {
+    auditDate = fallbackDate()
   }
 
   const resultados: ResultRow[] = []
